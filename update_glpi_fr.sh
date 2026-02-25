@@ -56,18 +56,28 @@ fi
 echo " -> Dernière version disponible : $LATEST_VERSION"
 echo " -> URL de mise à jour trouvée : $GLPI_URL"
 
+# Normalisation de la version GitHub (suppression du préfixe 'v' si présent)
+LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
+
 # Vérification de la version actuellement installée
+# Méthode 1 : via la console PHP GLPI (la plus fiable)
 CURRENT_VERSION=""
-if [ -f "$GLPI_DIR/version" ]; then
-    CURRENT_VERSION=$(cat "$GLPI_DIR/version" | tr -d '[:space:]')
+if [ -f "$GLPI_DIR/bin/console" ]; then
+    CURRENT_VERSION=$(sudo -u "$WEB_USER" php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 fi
+# Méthode 2 : depuis le fichier de définition PHP
 if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/inc/define.php" ]; then
-    CURRENT_VERSION=$(grep "define.*GLPI_VERSION" "$GLPI_DIR/inc/define.php" | sed -E "s/.*'(.*)'.*/\1/" | tr -d '[:space:]')
+    CURRENT_VERSION=$(grep "define.*GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE "'[0-9]+\.[0-9]+\.[0-9]+'" | tr -d "'")
+fi
+# Méthode 3 : depuis le fichier version (si existant)
+if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/version" ]; then
+    CURRENT_VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$GLPI_DIR/version" | head -1)
 fi
 
 echo " -> Version actuellement installée : ${CURRENT_VERSION:-inconnue}"
+echo " -> Dernière version disponible    : $LATEST_VERSION_CLEAN"
 
-if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION_CLEAN" ]; then
     echo "GLPI est déjà à jour (version $CURRENT_VERSION). Aucune mise à jour nécessaire."
     exit 0
 fi
@@ -138,6 +148,6 @@ sudo -u "$WEB_USER" php bin/console glpi:maintenance:disable --no-interaction 2>
 
 echo "=================================================="
 echo "  Mise à jour terminée avec succès ! "
-echo "  Version précédente : ${CURRENT_VERSION:-inconnue} -> Nouvelle version : $LATEST_VERSION"
+echo "  Version précédente : ${CURRENT_VERSION:-inconnue} -> Nouvelle version : $LATEST_VERSION_CLEAN"
 echo "  Dossier de l'ancienne version : ${GLPI_DIR}_old_${DATE}"
 echo "=================================================="

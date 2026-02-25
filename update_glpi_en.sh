@@ -56,18 +56,28 @@ fi
 echo " -> Latest version available: $LATEST_VERSION"
 echo " -> Update URL found: $GLPI_URL"
 
+# Normalize the GitHub version tag (strip leading 'v' if present)
+LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
+
 # Check current installed version
+# Method 1: via the GLPI PHP console (most reliable)
 CURRENT_VERSION=""
-if [ -f "$GLPI_DIR/version" ]; then
-    CURRENT_VERSION=$(cat "$GLPI_DIR/version" | tr -d '[:space:]')
+if [ -f "$GLPI_DIR/bin/console" ]; then
+    CURRENT_VERSION=$(sudo -u "$WEB_USER" php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 fi
+# Method 2: from the PHP definition file
 if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/inc/define.php" ]; then
-    CURRENT_VERSION=$(grep "define.*GLPI_VERSION" "$GLPI_DIR/inc/define.php" | sed -E "s/.*'(.*)'.*/\1/" | tr -d '[:space:]')
+    CURRENT_VERSION=$(grep "define.*GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE "'[0-9]+\.[0-9]+\.[0-9]+'" | tr -d "'")
+fi
+# Method 3: from the version file (if it exists)
+if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/version" ]; then
+    CURRENT_VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$GLPI_DIR/version" | head -1)
 fi
 
 echo " -> Current installed version: ${CURRENT_VERSION:-unknown}"
+echo " -> Latest version available : $LATEST_VERSION_CLEAN"
 
-if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION_CLEAN" ]; then
     echo "GLPI is already up to date (version $CURRENT_VERSION). No update needed."
     exit 0
 fi
@@ -138,6 +148,6 @@ sudo -u "$WEB_USER" php bin/console glpi:maintenance:disable --no-interaction 2>
 
 echo "=================================================="
 echo "  Update completed successfully! "
-echo "  Previous version: ${CURRENT_VERSION:-unknown} -> New version: $LATEST_VERSION"
+echo "  Previous version: ${CURRENT_VERSION:-unknown} -> New version: $LATEST_VERSION_CLEAN"
 echo "  Old version folder: ${GLPI_DIR}_old_${DATE} "
 echo "=================================================="
