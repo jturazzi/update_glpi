@@ -60,18 +60,27 @@ echo " -> URL de mise à jour trouvée : $GLPI_URL"
 LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
 
 # Vérification de la version actuellement installée
-# Méthode 1 : via la console PHP GLPI (la plus fiable)
 CURRENT_VERSION=""
-if [ -f "$GLPI_DIR/bin/console" ]; then
-    CURRENT_VERSION=$(sudo -u "$WEB_USER" php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+# Méthode 1 : grep direct sur inc/define.php (extraction du numéro X.Y.Z)
+if [ -f "$GLPI_DIR/inc/define.php" ]; then
+    CURRENT_VERSION=$(grep "GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 fi
-# Méthode 2 : depuis le fichier de définition PHP
-if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/inc/define.php" ]; then
-    CURRENT_VERSION=$(grep "define.*GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE "'[0-9]+\.[0-9]+\.[0-9]+'" | tr -d "'")
+
+# Méthode 2 : PHP en ligne — gère tous les styles de guillemets et espaces
+if [ -z "$CURRENT_VERSION" ]; then
+    CURRENT_VERSION=$(php -r "
+        \$f = '$GLPI_DIR/inc/define.php';
+        if (file_exists(\$f)) {
+            preg_match('/GLPI_VERSION[^0-9]*([0-9]+\\.[0-9]+\\.[0-9]+)/', file_get_contents(\$f), \$m);
+            echo isset(\$m[1]) ? \$m[1] : '';
+        }
+    " 2>/dev/null)
 fi
-# Méthode 3 : depuis le fichier version (si existant)
-if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/version" ]; then
-    CURRENT_VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$GLPI_DIR/version" | head -1)
+
+# Méthode 3 : console GLPI (GLPI >= 10.x)
+if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/bin/console" ]; then
+    CURRENT_VERSION=$(php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 fi
 
 echo " -> Version actuellement installée : ${CURRENT_VERSION:-inconnue}"

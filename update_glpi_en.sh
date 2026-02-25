@@ -60,18 +60,27 @@ echo " -> Update URL found: $GLPI_URL"
 LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
 
 # Check current installed version
-# Method 1: via the GLPI PHP console (most reliable)
 CURRENT_VERSION=""
-if [ -f "$GLPI_DIR/bin/console" ]; then
-    CURRENT_VERSION=$(sudo -u "$WEB_USER" php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+# Method 1: direct grep on inc/define.php (extracts X.Y.Z number)
+if [ -f "$GLPI_DIR/inc/define.php" ]; then
+    CURRENT_VERSION=$(grep "GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 fi
-# Method 2: from the PHP definition file
-if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/inc/define.php" ]; then
-    CURRENT_VERSION=$(grep "define.*GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE "'[0-9]+\.[0-9]+\.[0-9]+'" | tr -d "'")
+
+# Method 2: inline PHP — handles all quote styles and whitespace
+if [ -z "$CURRENT_VERSION" ]; then
+    CURRENT_VERSION=$(php -r "
+        \$f = '$GLPI_DIR/inc/define.php';
+        if (file_exists(\$f)) {
+            preg_match('/GLPI_VERSION[^0-9]*([0-9]+\\.[0-9]+\\.[0-9]+)/', file_get_contents(\$f), \$m);
+            echo isset(\$m[1]) ? \$m[1] : '';
+        }
+    " 2>/dev/null)
 fi
-# Method 3: from the version file (if it exists)
-if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/version" ]; then
-    CURRENT_VERSION=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$GLPI_DIR/version" | head -1)
+
+# Method 3: GLPI console (GLPI >= 10.x)
+if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/bin/console" ]; then
+    CURRENT_VERSION=$(php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 fi
 
 echo " -> Current installed version: ${CURRENT_VERSION:-unknown}"
