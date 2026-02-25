@@ -62,22 +62,26 @@ LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
 CURRENT_VERSION=$(MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -u "$DB_USER" -s -N -e \
     "SELECT value FROM glpi_configs WHERE name = 'version' LIMIT 1;" "$DB_NAME" 2>/dev/null | tr -d '[:space:]')
 
-echo " -> Current installed version: ${CURRENT_VERSION:-unknown}"
-echo " -> Latest version available : $LATEST_VERSION_CLEAN"
-
-if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION_CLEAN" ]; then
-    echo "GLPI is already up to date (version $CURRENT_VERSION). No update needed."
-    exit 0
-fi
-
 # ==========================================
-# 4. Enabling maintenance mode
+# 4. Enabling maintenance mode (DB connection confirmed)
 # ==========================================
+# Enable maintenance mode as soon as the DB connection is confirmed
 echo "[4/9] Enabling maintenance mode..."
 cd "$GLPI_DIR"
 sudo -u "$WEB_USER" php bin/console glpi:maintenance:enable --no-interaction 2>/dev/null \
     && echo " -> Maintenance mode enabled." \
     || echo " -> Warning: Could not enable maintenance mode (continuing anyway)."
+
+echo " -> Current installed version: ${CURRENT_VERSION:-unknown}"
+echo " -> Latest version available : $LATEST_VERSION_CLEAN"
+
+if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION_CLEAN" ]; then
+    echo "GLPI is already up to date (version $CURRENT_VERSION). No update needed."
+    sudo -u "$WEB_USER" php bin/console glpi:maintenance:disable --no-interaction 2>/dev/null \
+        && echo " -> Maintenance mode disabled." \
+        || echo " -> Warning: Could not disable maintenance mode. Please disable it manually."
+    exit 0
+fi
 
 # ==========================================
 # 5. Database backup
