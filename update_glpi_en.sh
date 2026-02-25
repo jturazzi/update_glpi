@@ -59,29 +59,9 @@ echo " -> Update URL found: $GLPI_URL"
 # Normalize the GitHub version tag (strip leading 'v' if present)
 LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
 
-# Check current installed version
-CURRENT_VERSION=""
-
-# Method 1: direct grep on inc/define.php (extracts X.Y.Z number)
-if [ -f "$GLPI_DIR/inc/define.php" ]; then
-    CURRENT_VERSION=$(grep "GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-fi
-
-# Method 2: inline PHP — handles all quote styles and whitespace
-if [ -z "$CURRENT_VERSION" ]; then
-    CURRENT_VERSION=$(php -r "
-        \$f = '$GLPI_DIR/inc/define.php';
-        if (file_exists(\$f)) {
-            preg_match('/GLPI_VERSION[^0-9]*([0-9]+\\.[0-9]+\\.[0-9]+)/', file_get_contents(\$f), \$m);
-            echo isset(\$m[1]) ? \$m[1] : '';
-        }
-    " 2>/dev/null)
-fi
-
-# Method 3: GLPI console (GLPI >= 10.x)
-if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/bin/console" ]; then
-    CURRENT_VERSION=$(php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-fi
+# Check current installed version (from the database)
+CURRENT_VERSION=$(MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -u "$DB_USER" -s -N -e \
+    "SELECT value FROM glpi_configs WHERE name = 'version' LIMIT 1;" "$DB_NAME" 2>/dev/null | tr -d '[:space:]')
 
 echo " -> Current installed version: ${CURRENT_VERSION:-unknown}"
 echo " -> Latest version available : $LATEST_VERSION_CLEAN"

@@ -59,29 +59,9 @@ echo " -> URL de mise à jour trouvée : $GLPI_URL"
 # Normalisation de la version GitHub (suppression du préfixe 'v' si présent)
 LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
 
-# Vérification de la version actuellement installée
-CURRENT_VERSION=""
-
-# Méthode 1 : grep direct sur inc/define.php (extraction du numéro X.Y.Z)
-if [ -f "$GLPI_DIR/inc/define.php" ]; then
-    CURRENT_VERSION=$(grep "GLPI_VERSION" "$GLPI_DIR/inc/define.php" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-fi
-
-# Méthode 2 : PHP en ligne — gère tous les styles de guillemets et espaces
-if [ -z "$CURRENT_VERSION" ]; then
-    CURRENT_VERSION=$(php -r "
-        \$f = '$GLPI_DIR/inc/define.php';
-        if (file_exists(\$f)) {
-            preg_match('/GLPI_VERSION[^0-9]*([0-9]+\\.[0-9]+\\.[0-9]+)/', file_get_contents(\$f), \$m);
-            echo isset(\$m[1]) ? \$m[1] : '';
-        }
-    " 2>/dev/null)
-fi
-
-# Méthode 3 : console GLPI (GLPI >= 10.x)
-if [ -z "$CURRENT_VERSION" ] && [ -f "$GLPI_DIR/bin/console" ]; then
-    CURRENT_VERSION=$(php "$GLPI_DIR/bin/console" glpi:version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-fi
+# Vérification de la version actuellement installée (depuis la base de données)
+CURRENT_VERSION=$(MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -u "$DB_USER" -s -N -e \
+    "SELECT value FROM glpi_configs WHERE name = 'version' LIMIT 1;" "$DB_NAME" 2>/dev/null | tr -d '[:space:]')
 
 echo " -> Version actuellement installée : ${CURRENT_VERSION:-inconnue}"
 echo " -> Dernière version disponible    : $LATEST_VERSION_CLEAN"
