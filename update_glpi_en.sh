@@ -53,7 +53,6 @@ if [ -z "$GLPI_URL" ] || [ -z "$LATEST_VERSION" ]; then
     echo "Error: Could not find the download link or latest version."
     exit 1
 fi
-echo " -> Latest version available: $LATEST_VERSION"
 echo " -> Update URL found: $GLPI_URL"
 
 # Normalize the GitHub version tag (strip leading 'v' if present)
