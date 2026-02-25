@@ -76,6 +76,8 @@ L'ancien répertoire d'installation GLPI est également conservé sur le disque 
 ## Notes importantes
 
 - Le script s'arrête immédiatement en cas d'erreur (`set -e`). Si une étape échoue, la sauvegarde précédente reste intacte.
+- **Vérification de version** : si GLPI est déjà sur la dernière version, le script se termine proprement sans effectuer aucune modification.
+- **Mode maintenance** : activé automatiquement avant toute modification de fichier et désactivé après une mise à jour réussie. En cas d'échec, le mode maintenance reste actif afin que le site demeure inaccessible jusqu'à l'intervention de l'administrateur.
 - Les plugins et extensions du marketplace sont automatiquement migrés vers la nouvelle version.
 - Après la mise à jour, vérifiez que vos plugins sont compatibles avec la nouvelle version de GLPI.
 
