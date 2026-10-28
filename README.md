@@ -41,9 +41,26 @@ The database credentials (host, user, password, database name) are read automati
 # Make the script executable (already done if you cloned this repo)
 chmod +x update_glpi_en.sh
 
-# Run as root
+# Run as root (latest stable version, or interactive menu in a terminal)
 sudo ./update_glpi_en.sh
+
+# List available stable versions
+sudo ./update_glpi_en.sh --list
+
+# Force an exact version
+sudo ./update_glpi_en.sh --version 11.0.12
+
+# Stay on a series: installs the latest 11.x (e.g. to avoid moving to 12)
+sudo ./update_glpi_en.sh --version 11
 ```
+
+| Option | Description |
+|---|---|
+| `-v`, `--version VERSION` | Exact version (`11.0.12`) or series (`11`, `11.0` → latest matching version) |
+| `-l`, `--list` | List available stable versions and exit |
+| `-h`, `--help` | Show help |
+
+Without options, a menu offers the latest version of each series when run from a terminal; non-interactively (cron), the latest stable version is installed. **For a cron job, use `--version 11` to avoid automatically jumping to 12.** Downgrading below the installed version is refused.
 
 ## What the script does
 
