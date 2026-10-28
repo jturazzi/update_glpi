@@ -3,6 +3,27 @@
 # Arrêter le script en cas d'erreur critique
 set -e
 
+usage() {
+    echo "Usage : $0 [-v|--version VERSION] [-l|--list] [-h|--help]"
+    echo "  -v, --version VERSION  Version à installer : exacte (11.0.12) ou série (11 ou 11.0 = dernière 11.x)"
+    echo "  -l, --list             Affiche les versions stables disponibles et quitte"
+    echo "  -h, --help             Affiche cette aide"
+    echo "Sans option : menu interactif en terminal, sinon dernière version stable."
+}
+
+TARGET_VERSION=""
+LIST_ONLY=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -v|--version)
+            if [ -z "${2:-}" ]; then echo "Erreur : $1 nécessite une valeur."; usage; exit 1; fi
+            TARGET_VERSION="$2"; shift 2 ;;
+        -l|--list) LIST_ONLY=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Option inconnue : $1"; usage; exit 1 ;;
+    esac
+done
+
 echo "=================================================="
 echo "  Sauvegarde et MAJ Automatique vers GLPI "
 echo "=================================================="
@@ -44,19 +65,60 @@ echo " -> Succès : Base '$DB_NAME', Hôte '$DB_HOST'."
 # ==========================================
 # 3. Récupération de la dernière version GLPI + vérification de version
 # ==========================================
-echo "[3/9] Recherche de la dernière version de GLPI sur GitHub..."
-API_RESPONSE=$(curl -s https://api.github.com/repos/glpi-project/glpi/releases/latest)
-GLPI_URL=$(echo "$API_RESPONSE" | grep browser_download_url | grep -i "\.tgz" | cut -d '"' -f 4)
-LATEST_VERSION=$(echo "$API_RESPONSE" | grep '"tag_name"' | cut -d '"' -f 4)
+echo "[3/9] Recherche des versions de GLPI sur GitHub..."
+RELEASES_JSON=$(curl -s "https://api.github.com/repos/glpi-project/glpi/releases?per_page=100")
+# Versions stables uniquement (X.Y.Z), de la plus récente à la plus ancienne
+AVAILABLE_VERSIONS=$(echo "$RELEASES_JSON" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -Vu | sort -Vr || true)
 
-if [ -z "$GLPI_URL" ] || [ -z "$LATEST_VERSION" ]; then
-    echo "Erreur : Impossible de trouver le lien de téléchargement ou la dernière version."
+if [ -z "$AVAILABLE_VERSIONS" ]; then
+    echo "Erreur : Impossible de récupérer la liste des versions GLPI."
+    exit 1
+fi
+
+if [ "$LIST_ONLY" = "1" ]; then
+    echo "Versions stables disponibles :"
+    echo "$AVAILABLE_VERSIONS" | sed 's/^/  /'
+    exit 0
+fi
+
+# Menu interactif (terminal uniquement) si aucune version n'est imposée
+if [ -z "$TARGET_VERSION" ] && [ -t 0 ] && [ -t 1 ]; then
+    SERIES=$(echo "$AVAILABLE_VERSIONS" | awk -F. '!seen[$1"."$2]++' | head -6)
+    echo "Dernière version de chaque série disponible :"
+    i=1
+    while read -r v; do
+        echo "  $i) $v"
+        i=$((i + 1))
+    done <<< "$SERIES"
+    read -r -p "Choix (numéro, ou Entrée pour la plus récente) : " CHOICE
+    if [ -n "$CHOICE" ]; then
+        TARGET_VERSION=$(echo "$SERIES" | sed -n "${CHOICE}p" 2>/dev/null)
+        if [ -z "$TARGET_VERSION" ]; then
+            echo "Erreur : choix invalide."
+            exit 1
+        fi
+    fi
+fi
+
+if [ -z "$TARGET_VERSION" ]; then
+    LATEST_VERSION_CLEAN=$(echo "$AVAILABLE_VERSIONS" | head -1)
+else
+    TARGET_VERSION="${TARGET_VERSION#v}"
+    # Correspondance exacte (11.0.12) ou par série (11, 11.0) : la plus récente est retenue
+    LATEST_VERSION_CLEAN=$(echo "$AVAILABLE_VERSIONS" | grep -E "^${TARGET_VERSION//./\\.}(\.|$)" | head -1 || true)
+    if [ -z "$LATEST_VERSION_CLEAN" ]; then
+        echo "Erreur : aucune version stable ne correspond à '$TARGET_VERSION' (voir --list)."
+        exit 1
+    fi
+fi
+
+GLPI_URL="https://github.com/glpi-project/glpi/releases/download/${LATEST_VERSION_CLEAN}/glpi-${LATEST_VERSION_CLEAN}.tgz"
+if ! curl -sIL -f -o /dev/null "$GLPI_URL"; then
+    echo "Erreur : archive de téléchargement introuvable : $GLPI_URL"
     exit 1
 fi
 echo " -> URL de mise à jour trouvée : $GLPI_URL"
-
-# Normalisation de la version GitHub (suppression du préfixe 'v' si présent)
-LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
 
 # Vérification de la version actuellement installée (depuis la base de données)
 CURRENT_VERSION=$(MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -u "$DB_USER" -s -N -e \
@@ -73,7 +135,15 @@ sudo -u "$WEB_USER" php bin/console glpi:maintenance:enable --no-interaction 2>/
     || echo " -> Avertissement : Impossible d'activer le mode maintenance (on continue quand même)."
 
 echo " -> Version actuellement installée : ${CURRENT_VERSION:-inconnue}"
-echo " -> Dernière version disponible    : $LATEST_VERSION_CLEAN"
+echo " -> Version cible                  : $LATEST_VERSION_CLEAN"
+
+# Refus du retour arrière (une base migrée ne peut pas être rétrogradée)
+if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$LATEST_VERSION_CLEAN" ] \
+    && [ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "$LATEST_VERSION_CLEAN" | sort -V | head -1)" != "$CURRENT_VERSION" ]; then
+    echo "Erreur : la version demandée ($LATEST_VERSION_CLEAN) est inférieure à la version installée ($CURRENT_VERSION)."
+    sudo -u "$WEB_USER" php bin/console glpi:maintenance:disable --no-interaction 2>/dev/null || true
+    exit 1
+fi
 
 if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION_CLEAN" ]; then
     echo "GLPI est déjà à jour (version $CURRENT_VERSION). Aucune mise à jour nécessaire."

@@ -41,9 +41,26 @@ Les identifiants de la base de données (hôte, utilisateur, mot de passe, nom d
 # Rendre le script exécutable (déjà fait si vous avez cloné ce dépôt)
 chmod +x update_glpi_fr.sh
 
-# Exécuter en root
+# Exécuter en root (dernière version stable, ou menu interactif en terminal)
 sudo ./update_glpi_fr.sh
+
+# Lister les versions stables disponibles
+sudo ./update_glpi_fr.sh --list
+
+# Forcer une version exacte
+sudo ./update_glpi_fr.sh --version 11.0.12
+
+# Rester sur une série : installe la dernière 11.x (ex. si vous ne voulez pas passer à la 12)
+sudo ./update_glpi_fr.sh --version 11
 ```
+
+| Option | Description |
+|---|---|
+| `-v`, `--version VERSION` | Version exacte (`11.0.12`) ou série (`11`, `11.0` → dernière version correspondante) |
+| `-l`, `--list` | Affiche les versions stables disponibles et quitte |
+| `-h`, `--help` | Affiche l'aide |
+
+Sans option, un menu propose la dernière version de chaque série lorsque le script est lancé depuis un terminal ; en non-interactif (cron), la dernière version stable est installée. **Pour un cron, utilisez `--version 11` afin de ne pas basculer automatiquement vers la 12.** Le retour arrière vers une version inférieure à celle installée est refusé.
 
 ## Ce que fait le script
 

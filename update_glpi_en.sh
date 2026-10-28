@@ -3,6 +3,27 @@
 # Stop the script in case of critical error
 set -e
 
+usage() {
+    echo "Usage: $0 [-v|--version VERSION] [-l|--list] [-h|--help]"
+    echo "  -v, --version VERSION  Version to install: exact (11.0.12) or series (11 or 11.0 = latest 11.x)"
+    echo "  -l, --list             List available stable versions and exit"
+    echo "  -h, --help             Show this help"
+    echo "Without options: interactive menu in a terminal, otherwise latest stable version."
+}
+
+TARGET_VERSION=""
+LIST_ONLY=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -v|--version)
+            if [ -z "${2:-}" ]; then echo "Error: $1 requires a value."; usage; exit 1; fi
+            TARGET_VERSION="$2"; shift 2 ;;
+        -l|--list) LIST_ONLY=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $1"; usage; exit 1 ;;
+    esac
+done
+
 echo "=================================================="
 echo "  Automatic Backup and Update to GLPI "
 echo "=================================================="
@@ -44,19 +65,60 @@ echo " -> Success: Database '$DB_NAME', Host '$DB_HOST'."
 # ==========================================
 # 3. Retrieving the latest GLPI version + version check
 # ==========================================
-echo "[3/9] Searching for the latest GLPI version on GitHub..."
-API_RESPONSE=$(curl -s https://api.github.com/repos/glpi-project/glpi/releases/latest)
-GLPI_URL=$(echo "$API_RESPONSE" | grep browser_download_url | grep -i "\.tgz" | cut -d '"' -f 4)
-LATEST_VERSION=$(echo "$API_RESPONSE" | grep '"tag_name"' | cut -d '"' -f 4)
+echo "[3/9] Searching for GLPI versions on GitHub..."
+RELEASES_JSON=$(curl -s "https://api.github.com/repos/glpi-project/glpi/releases?per_page=100")
+# Stable versions only (X.Y.Z), newest first
+AVAILABLE_VERSIONS=$(echo "$RELEASES_JSON" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -Vu | sort -Vr || true)
 
-if [ -z "$GLPI_URL" ] || [ -z "$LATEST_VERSION" ]; then
-    echo "Error: Could not find the download link or latest version."
+if [ -z "$AVAILABLE_VERSIONS" ]; then
+    echo "Error: Could not retrieve the list of GLPI versions."
+    exit 1
+fi
+
+if [ "$LIST_ONLY" = "1" ]; then
+    echo "Available stable versions:"
+    echo "$AVAILABLE_VERSIONS" | sed 's/^/  /'
+    exit 0
+fi
+
+# Interactive menu (terminal only) when no version is forced
+if [ -z "$TARGET_VERSION" ] && [ -t 0 ] && [ -t 1 ]; then
+    SERIES=$(echo "$AVAILABLE_VERSIONS" | awk -F. '!seen[$1"."$2]++' | head -6)
+    echo "Latest version of each available series:"
+    i=1
+    while read -r v; do
+        echo "  $i) $v"
+        i=$((i + 1))
+    done <<< "$SERIES"
+    read -r -p "Choice (number, or Enter for the newest): " CHOICE
+    if [ -n "$CHOICE" ]; then
+        TARGET_VERSION=$(echo "$SERIES" | sed -n "${CHOICE}p" 2>/dev/null)
+        if [ -z "$TARGET_VERSION" ]; then
+            echo "Error: invalid choice."
+            exit 1
+        fi
+    fi
+fi
+
+if [ -z "$TARGET_VERSION" ]; then
+    LATEST_VERSION_CLEAN=$(echo "$AVAILABLE_VERSIONS" | head -1)
+else
+    TARGET_VERSION="${TARGET_VERSION#v}"
+    # Exact match (11.0.12) or series match (11, 11.0): the newest match is used
+    LATEST_VERSION_CLEAN=$(echo "$AVAILABLE_VERSIONS" | grep -E "^${TARGET_VERSION//./\\.}(\.|$)" | head -1 || true)
+    if [ -z "$LATEST_VERSION_CLEAN" ]; then
+        echo "Error: no stable version matches '$TARGET_VERSION' (see --list)."
+        exit 1
+    fi
+fi
+
+GLPI_URL="https://github.com/glpi-project/glpi/releases/download/${LATEST_VERSION_CLEAN}/glpi-${LATEST_VERSION_CLEAN}.tgz"
+if ! curl -sIL -f -o /dev/null "$GLPI_URL"; then
+    echo "Error: download archive not found: $GLPI_URL"
     exit 1
 fi
 echo " -> Update URL found: $GLPI_URL"
-
-# Normalize the GitHub version tag (strip leading 'v' if present)
-LATEST_VERSION_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
 
 # Check current installed version (from the database)
 CURRENT_VERSION=$(MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -u "$DB_USER" -s -N -e \
@@ -73,7 +135,15 @@ sudo -u "$WEB_USER" php bin/console glpi:maintenance:enable --no-interaction 2>/
     || echo " -> Warning: Could not enable maintenance mode (continuing anyway)."
 
 echo " -> Current installed version: ${CURRENT_VERSION:-unknown}"
-echo " -> Latest version available : $LATEST_VERSION_CLEAN"
+echo " -> Target version           : $LATEST_VERSION_CLEAN"
+
+# Refuse downgrades (a migrated database cannot be rolled back)
+if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$LATEST_VERSION_CLEAN" ] \
+    && [ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "$LATEST_VERSION_CLEAN" | sort -V | head -1)" != "$CURRENT_VERSION" ]; then
+    echo "Error: requested version ($LATEST_VERSION_CLEAN) is older than the installed one ($CURRENT_VERSION)."
+    sudo -u "$WEB_USER" php bin/console glpi:maintenance:disable --no-interaction 2>/dev/null || true
+    exit 1
+fi
 
 if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION_CLEAN" ]; then
     echo "GLPI is already up to date (version $CURRENT_VERSION). No update needed."
